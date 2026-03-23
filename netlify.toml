@@ -1,9 +1,2 @@
 [build]
   functions = "netlify/functions"
-
-[build.environment]
-  NODE_VERSION = "18"
-
-[[functions]]
-  directory = "netlify/functions"
-  build_command = "cd netlify/functions && npm install"
