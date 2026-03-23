@@ -1,6 +1,7 @@
 {
   "name": "supportai-functions",
   "version": "1.0.0",
+  "type": "commonjs",
   "dependencies": {
     "@neondatabase/serverless": "^0.6.0"
   }
