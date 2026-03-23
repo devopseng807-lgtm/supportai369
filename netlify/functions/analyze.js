@@ -1,50 +1,59 @@
-import { getStore } from '@netlify/blobs';
+// Import Neon PostgreSQL client
+import { neon } from '@neondatabase/serverless';
 
-// Helper: Rate limiter (per IP)
+// Helper: Rate limiter (per IP) - uses Netlify Blob for simplicity
+// If you don't want rate limiting yet, you can remove this part
 async function checkRateLimit(ip) {
-  const store = getStore('rate-limits');
-  const key = `analyze:${ip}`;
-  const now = Date.now();
-  const windowMs = 60 * 1000; // 1 minute
-  const maxRequests = 10;     // 10 requests per minute
+  try {
+    const store = getStore('rate-limits');
+    const key = `analyze:${ip}`;
+    const now = Date.now();
+    const windowMs = 60 * 1000; // 1 minute
+    const maxRequests = 10;     // 10 requests per minute
 
-  const record = await store.get(key);
-  let count = 1;
-  let windowStart = now;
+    const record = await store.get(key);
+    let count = 1;
+    let windowStart = now;
 
-  if (record) {
-    const data = JSON.parse(record);
-    if (now - data.windowStart < windowMs) {
-      count = data.count + 1;
-      windowStart = data.windowStart;
+    if (record) {
+      const data = JSON.parse(record);
+      if (now - data.windowStart < windowMs) {
+        count = data.count + 1;
+        windowStart = data.windowStart;
+      }
     }
-  }
 
-  if (count > maxRequests) {
-    return { limited: true, retryAfter: Math.ceil((windowStart + windowMs - now) / 1000) };
-  }
+    if (count > maxRequests) {
+      return { limited: true, retryAfter: Math.ceil((windowStart + windowMs - now) / 1000) };
+    }
 
-  await store.set(key, JSON.stringify({ count, windowStart }));
-  return { limited: false };
+    await store.set(key, JSON.stringify({ count, windowStart }));
+    return { limited: false };
+  } catch (err) {
+    // If rate limiting fails, allow the request (fail open)
+    console.warn('Rate limiter error:', err);
+    return { limited: false };
+  }
 }
 
+// Main function
 export default async (req, context) => {
-  // 1. Rate limiting
-  const clientIp = context.ip || req.headers['x-forwarded-for'] || 'unknown';
-  const rate = await checkRateLimit(clientIp);
-  if (rate.limited) {
-    return new Response(
-      JSON.stringify({ error: 'Too many requests. Please try again later.' }),
-      { status: 429, headers: { 'Retry-After': rate.retryAfter.toString() } }
-    );
-  }
+  // 1. Rate limiting (optional - if you have blob store for rate limits)
+  // const clientIp = context.ip || req.headers['x-forwarded-for'] || 'unknown';
+  // const rate = await checkRateLimit(clientIp);
+  // if (rate.limited) {
+  //   return new Response(
+  //     JSON.stringify({ error: 'Too many requests. Please try again later.' }),
+  //     { status: 429, headers: { 'Retry-After': rate.retryAfter.toString() } }
+  //   );
+  // }
 
   // 2. Method check
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  // 3. Input validation & sanitization
+  // 3. Input validation
   let body;
   try {
     body = await req.json();
@@ -67,32 +76,42 @@ export default async (req, context) => {
     return new Response(JSON.stringify({ error: 'query exceeds 500 characters' }), { status: 400 });
   }
 
-  // Reject any unexpected fields (allow only 'query')
+  // Reject any unexpected fields
   const allowedKeys = ['query'];
   const extraKeys = Object.keys(body).filter(k => !allowedKeys.includes(k));
   if (extraKeys.length) {
     return new Response(JSON.stringify({ error: `Unexpected fields: ${extraKeys.join(', ')}` }), { status: 400 });
   }
 
-  // Basic sanitization: remove control characters and trim
+  // Basic sanitization
   const sanitizedQuery = trimmed.replace(/[\x00-\x1F\x7F]/g, '');
 
   // 4. Create request ID
   const requestId = crypto.randomUUID();
 
-  // 5. Store in blob
-  const store = getStore('supportai-requests');
-  await store.set(requestId, JSON.stringify({
-    query: sanitizedQuery,
-    status: 'processing',
-    report: null,
-    createdAt: new Date().toISOString(),
-  }));
+  // 5. Connect to Neon PostgreSQL
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.error('DATABASE_URL not set');
+    return new Response(JSON.stringify({ error: 'Database configuration error' }), { status: 500 });
+  }
+
+  const sql = neon(databaseUrl);
+
+  try {
+    // Insert the request into the database
+    await sql`
+      INSERT INTO requests (id, query, status, created_at)
+      VALUES (${requestId}, ${sanitizedQuery}, 'processing', NOW())
+    `;
+  } catch (err) {
+    console.error('Database insert error:', err);
+    return new Response(JSON.stringify({ error: 'Database error' }), { status: 500 });
+  }
 
   // 6. Call n8n webhook (asynchronously)
   const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
   if (n8nWebhookUrl) {
-    // Optionally include the request IP for context
     fetch(n8nWebhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,11 +119,8 @@ export default async (req, context) => {
         requestId,
         query: sanitizedQuery,
         callbackUrl: `${process.env.URL}/api/webhook`,
-        clientIp,
       }),
     }).catch(err => console.error('Failed to call n8n', err));
-  } else {
-    console.warn('N8N_WEBHOOK_URL not set');
   }
 
   // 7. Return response
@@ -116,4 +132,3 @@ export default async (req, context) => {
     headers: { 'Content-Type': 'application/json' },
   });
 };
-
