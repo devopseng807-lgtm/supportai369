@@ -1,5 +1,6 @@
 [build]
   functions = "netlify/functions"
 
-[dev]
-  command = "echo 'Ready for development'"
+[build.environment]
+  # This tells Netlify to install dependencies in the functions folder
+  NODE_VERSION = "18"
