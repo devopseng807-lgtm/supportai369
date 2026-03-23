@@ -1,66 +1,111 @@
-import { neon } from '@neondatabase/serverless';
+const { neon } = require('@neondatabase/serverless');
 
-export default async (req, context) => {
-  // 1. API key authentication
+export default async (req) => {
+  // Handle CORS
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+      }
+    });
+  }
+
+  // API key authentication
   const apiKey = req.headers['x-api-key'];
   const expectedKey = process.env.N8N_WEBHOOK_SECRET;
   
-  if (!expectedKey || apiKey !== expectedKey) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+  if (expectedKey && apiKey !== expectedKey) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized' }),
+      { 
+        status: 401, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 2. Method and content type
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      { 
+        status: 405, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 3. Validate payload
   let payload;
   try {
     payload = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON body' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
   const { requestId, report } = payload;
 
-  if (!requestId || typeof requestId !== 'string') {
-    return new Response(JSON.stringify({ error: 'Missing or invalid requestId' }), { status: 400 });
-  }
-  if (!report || typeof report !== 'object') {
-    return new Response(JSON.stringify({ error: 'Missing or invalid report (must be object)' }), { status: 400 });
-  }
-
-  // Validate UUID format
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(requestId)) {
-    return new Response(JSON.stringify({ error: 'Invalid requestId format' }), { status: 400 });
-  }
-
-  // Reject unexpected fields
-  const allowedKeys = ['requestId', 'report'];
-  const extraKeys = Object.keys(payload).filter(k => !allowedKeys.includes(k));
-  if (extraKeys.length) {
-    return new Response(JSON.stringify({ error: `Unexpected fields: ${extraKeys.join(', ')}` }), { status: 400 });
+  if (!requestId || !report) {
+    return new Response(
+      JSON.stringify({ error: 'Missing requestId or report' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 4. Connect to Neon PostgreSQL
   const databaseUrl = process.env.DATABASE_URL;
+  
   if (!databaseUrl) {
-    console.error('DATABASE_URL not set');
-    return new Response(JSON.stringify({ error: 'Database configuration error' }), { status: 500 });
+    return new Response(
+      JSON.stringify({ error: 'Database not configured' }),
+      { 
+        status: 500, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
-
-  const sql = neon(databaseUrl);
 
   try {
-    // First check if request exists
+    const sql = neon(databaseUrl);
+    
     const existing = await sql`SELECT id FROM requests WHERE id = ${requestId}`;
     if (existing.length === 0) {
-      return new Response(JSON.stringify({ error: 'Request not found' }), { status: 404 });
+      return new Response(
+        JSON.stringify({ error: 'Request not found' }),
+        { 
+          status: 404, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          } 
+        }
+      );
     }
 
-    // Update status and report
     await sql`
       UPDATE requests
       SET status = 'ready', 
@@ -69,12 +114,27 @@ export default async (req, context) => {
       WHERE id = ${requestId}
     `;
 
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ success: true }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   } catch (err) {
-    console.error('Database update error:', err);
-    return new Response(JSON.stringify({ error: 'Database error' }), { status: 500 });
+    console.error('Webhook error:', err);
+    return new Response(
+      JSON.stringify({ error: 'Database error', details: err.message }),
+      { 
+        status: 500, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 };
