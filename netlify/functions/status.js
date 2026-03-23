@@ -1,50 +1,107 @@
-import { neon } from '@neondatabase/serverless';
+const { neon } = require('@neondatabase/serverless');
 
-export default async (req, context) => {
-  // 1. Parse query parameters
+export default async (req) => {
+  // Handle CORS
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      }
+    });
+  }
+
+  // Parse query parameters
   const url = new URL(req.url);
   const requestId = url.searchParams.get('id');
 
   if (!requestId) {
-    return new Response(JSON.stringify({ error: 'Missing id parameter' }), { status: 400 });
+    return new Response(
+      JSON.stringify({ error: 'Missing id parameter' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 2. Validate UUID format
+  // Validate UUID format
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!uuidRegex.test(requestId)) {
-    return new Response(JSON.stringify({ error: 'Invalid id format' }), { status: 400 });
+    return new Response(
+      JSON.stringify({ error: 'Invalid id format' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 3. Connect to Neon PostgreSQL
   const databaseUrl = process.env.DATABASE_URL;
+  
   if (!databaseUrl) {
-    console.error('DATABASE_URL not set');
-    return new Response(JSON.stringify({ error: 'Database configuration error' }), { status: 500 });
+    return new Response(
+      JSON.stringify({ status: 'processing', report: null, warning: 'Database not configured' }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
-
-  const sql = neon(databaseUrl);
 
   try {
-    // Query the database for this request
+    const sql = neon(databaseUrl);
     const rows = await sql`
       SELECT status, report FROM requests WHERE id = ${requestId}
     `;
     
     if (rows.length === 0) {
-      return new Response(JSON.stringify({ error: 'Request not found' }), { status: 404 });
+      return new Response(
+        JSON.stringify({ error: 'Request not found' }),
+        { 
+          status: 404, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          } 
+        }
+      );
     }
     
     const { status, report } = rows[0];
     
-    return new Response(JSON.stringify({
-      status,
-      report,
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ status, report }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   } catch (err) {
-    console.error('Database query error:', err);
-    return new Response(JSON.stringify({ error: 'Database error' }), { status: 500 });
+    console.error('Database error:', err);
+    return new Response(
+      JSON.stringify({ status: 'processing', report: null, error: err.message }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 };
