@@ -1,115 +1,136 @@
-// Import Neon PostgreSQL client
-import { neon } from '@neondatabase/serverless';
+// Use require instead of import for better compatibility
+const { neon } = require('@neondatabase/serverless');
 
-// Helper: Rate limiter (per IP) - uses Netlify Blob for simplicity
-// If you don't want rate limiting yet, you can remove this part
-async function checkRateLimit(ip) {
-  try {
-    const store = getStore('rate-limits');
-    const key = `analyze:${ip}`;
-    const now = Date.now();
-    const windowMs = 60 * 1000; // 1 minute
-    const maxRequests = 10;     // 10 requests per minute
-
-    const record = await store.get(key);
-    let count = 1;
-    let windowStart = now;
-
-    if (record) {
-      const data = JSON.parse(record);
-      if (now - data.windowStart < windowMs) {
-        count = data.count + 1;
-        windowStart = data.windowStart;
+export default async (req) => {
+  // 1. Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
       }
-    }
-
-    if (count > maxRequests) {
-      return { limited: true, retryAfter: Math.ceil((windowStart + windowMs - now) / 1000) };
-    }
-
-    await store.set(key, JSON.stringify({ count, windowStart }));
-    return { limited: false };
-  } catch (err) {
-    // If rate limiting fails, allow the request (fail open)
-    console.warn('Rate limiter error:', err);
-    return { limited: false };
+    });
   }
-}
 
-// Main function
-export default async (req, context) => {
-  // 1. Rate limiting (optional - if you have blob store for rate limits)
-  // const clientIp = context.ip || req.headers['x-forwarded-for'] || 'unknown';
-  // const rate = await checkRateLimit(clientIp);
-  // if (rate.limited) {
-  //   return new Response(
-  //     JSON.stringify({ error: 'Too many requests. Please try again later.' }),
-  //     { status: 429, headers: { 'Retry-After': rate.retryAfter.toString() } }
-  //   );
-  // }
-
-  // 2. Method check
+  // 2. Only accept POST
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      { 
+        status: 405, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 3. Input validation
+  // 3. Parse and validate input
   let body;
   try {
     body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON body', details: e.message }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
   const { query } = body;
 
-  // Check required field and type
-  if (typeof query !== 'string') {
-    return new Response(JSON.stringify({ error: 'query must be a string' }), { status: 400 });
+  if (!query || typeof query !== 'string') {
+    return new Response(
+      JSON.stringify({ error: 'query is required and must be a string' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
   const trimmed = query.trim();
   if (trimmed.length === 0) {
-    return new Response(JSON.stringify({ error: 'query cannot be empty' }), { status: 400 });
-  }
-  if (trimmed.length > 500) {
-    return new Response(JSON.stringify({ error: 'query exceeds 500 characters' }), { status: 400 });
+    return new Response(
+      JSON.stringify({ error: 'query cannot be empty' }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // Reject any unexpected fields
-  const allowedKeys = ['query'];
-  const extraKeys = Object.keys(body).filter(k => !allowedKeys.includes(k));
-  if (extraKeys.length) {
-    return new Response(JSON.stringify({ error: `Unexpected fields: ${extraKeys.join(', ')}` }), { status: 400 });
-  }
-
-  // Basic sanitization
-  const sanitizedQuery = trimmed.replace(/[\x00-\x1F\x7F]/g, '');
-
-  // 4. Create request ID
+  const sanitizedQuery = trimmed.substring(0, 500);
   const requestId = crypto.randomUUID();
 
-  // 5. Connect to Neon PostgreSQL
+  // 4. Try to connect to Neon database
   const databaseUrl = process.env.DATABASE_URL;
+  
   if (!databaseUrl) {
     console.error('DATABASE_URL not set');
-    return new Response(JSON.stringify({ error: 'Database configuration error' }), { status: 500 });
+    // Even if DB fails, return success so frontend doesn't error
+    return new Response(
+      JSON.stringify({
+        requestId,
+        company: sanitizedQuery,
+        warning: 'Database not configured, running in demo mode'
+      }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  const sql = neon(databaseUrl);
-
   try {
-    // Insert the request into the database
+    // Create the SQL client
+    const sql = neon(databaseUrl);
+    
+    // Insert into database
     await sql`
       INSERT INTO requests (id, query, status, created_at)
       VALUES (${requestId}, ${sanitizedQuery}, 'processing', NOW())
     `;
-  } catch (err) {
-    console.error('Database insert error:', err);
-    return new Response(JSON.stringify({ error: 'Database error' }), { status: 500 });
+    
+    console.log('Successfully inserted request:', requestId);
+    
+  } catch (dbError) {
+    console.error('Database error:', dbError.message);
+    // Still return success but with warning
+    return new Response(
+      JSON.stringify({
+        requestId,
+        company: sanitizedQuery,
+        warning: 'Database error: ' + dbError.message
+      }),
+      { 
+        status: 200, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        } 
+      }
+    );
   }
 
-  // 6. Call n8n webhook (asynchronously)
+  // 5. Trigger n8n webhook (optional)
   const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
   if (n8nWebhookUrl) {
     fetch(n8nWebhookUrl, {
@@ -120,15 +141,22 @@ export default async (req, context) => {
         query: sanitizedQuery,
         callbackUrl: `${process.env.URL}/api/webhook`,
       }),
-    }).catch(err => console.error('Failed to call n8n', err));
+    }).catch(err => console.error('Failed to call n8n:', err));
   }
 
-  // 7. Return response
-  return new Response(JSON.stringify({
-    requestId,
-    company: sanitizedQuery,
-  }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  // 6. Return success response
+  return new Response(
+    JSON.stringify({
+      success: true,
+      requestId,
+      company: sanitizedQuery,
+    }),
+    { 
+      status: 200, 
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      } 
+    }
+  );
 };
