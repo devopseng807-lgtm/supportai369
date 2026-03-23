@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SupportAI | AI-Powered Customer Support</title>
+    
+    <!-- Link to your CSS file -->
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+
+<div class="container">
+    <!-- Header Section -->
+    <div class="hero">
+        <div class="badge">
+            <i class="fas fa-robot"></i>
+            <span>AI-Powered Customer Support</span>
+        </div>
+        <h1>SupportAI</h1>
+        <div class="tagline">Problem solving, simplified</div>
+        <div class="subhead">Enter any product name, company, or URL and let our AI agent handle your customer service questions instantly.</div>
+    </div>
+
+    <!-- Search Card -->
+    <div class="card">
+        <div class="input-group">
+            <i class="fas fa-search input-icon"></i>
+            <input type="text" id="companyInput" placeholder="Product name, company, or URL" value="https://www.google.com/maps">
+            <button class="analyze-btn" id="analyzeBtn">
+                Analyze <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- Features -->
+        <div class="features">
+            <div class="feature-item">
+                <i class="fas fa-chart-line"></i>
+                <h3>Instant Analysis</h3>
+                <p>We scan the URL or product name and surface key info in seconds.</p>
+            </div>
+            <div class="feature-item">
+                <i class="fas fa-comment-dots"></i>
+                <h3>Smart Responses</h3>
+                <p>Get AI-powered answers tailored to the specific product or service.</p>
+            </div>
+            <div class="feature-item">
+                <i class="fas fa-shield-alt"></i>
+                <h3>Trusted Sources</h3>
+                <p>All information is verified directly from reliable sources.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Section -->
+    <div class="agent-section">
+        <div class="agent-header">
+            <div class="agent-title">
+                <i class="fas fa-headset"></i>
+                <span>AI Customer Agent</span>
+            </div>
+            <div class="n8n-badge">
+                <i class="fas fa-diagram-project"></i>
+                n8n brain · deep research engine
+            </div>
+        </div>
+        
+        <div class="chat-window">
+            <div class="messages-area" id="messagesArea">
+                <div class="disabled-chat-placeholder">
+                    <i class="fas fa-microphone-alt"></i>
+                    <p>🔍 Enter a company/product/URL and click <strong>Analyze</strong><br> to activate the AI customer support agent.</p>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" placeholder="Ask a customer service question..." disabled>
+                <button id="sendMsgBtn" disabled>
+                    <i class="fas fa-paper-plane"></i> Send
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <footer>
+        <i class="fas fa-cogs"></i> Powered by n8n workflows • Real-time deep research
+    </footer>
+</div>
+
+<!-- Link to your JavaScript file -->
+<script src="script.js"></script>
+
+</body>
+</html>
